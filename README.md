@@ -1,4 +1,4 @@
-# Tax Knowledge Desk
+# Knowledge App
 
 税理士事務所向けのナレッジ管理アプリです。  
 ノートを自由に書き込むだけでカテゴリを自動判定し、カテゴリ別一覧や横断検索からすばやく見返せます。
@@ -31,23 +31,34 @@
 ## ローカル起動
 
 ```bash
-python3 -m http.server 4173
+./start-knowledge-app.sh
 ```
 
 [http://localhost:4173](http://localhost:4173) を開いて確認します。
+
+## Netlifyデプロイ
+
+ドラッグアンドドロップで公開するのが一番簡単です。
+
+```bash
+./scripts/prepare_netlify_release.sh
+```
+
+実行後にできる `dist` フォルダを Netlify へそのままドラッグアンドドロップしてください。
+ビルド設定は不要です。
 
 ## Supabase設定
 
 ### 1. テーブル作成
 
-[supabase/schema.sql](/Users/tatsuchan/Documents/New project/tax-knowledge-desk/supabase/schema.sql) を Supabase SQL Editor で実行してください。
+[supabase/schema.sql](/Users/tatsuchan/Documents/New project/knowledge-app/supabase/schema.sql) を Supabase SQL Editor で実行してください。
 
 ### 2. 接続情報の入力
 
 以下のいずれかで設定できます。
 
 1. アプリ右上の `接続設定` から `Supabase URL` と `Anon Key` を保存
-2. [config.local.example.js](/Users/tatsuchan/Documents/New project/tax-knowledge-desk/config.local.example.js) を参考に `config.local.js` を作成
+2. [config.local.example.js](/Users/tatsuchan/Documents/New project/knowledge-app/config.local.example.js) を参考に `config.local.js` を作成
 
 初期状態は `モックデータで確認する` が有効です。
 
