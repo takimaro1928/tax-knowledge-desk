@@ -1,16 +1,13 @@
 import {
   approveKnowledge,
   createKnowledge,
-  deleteKnowledge,
   getConnectionMode,
   loadKnowledge,
   rejectKnowledge,
-  uploadKnowledgeImage,
-  updateKnowledge,
 } from './api.js';
 import { readAppConfig, saveAppConfig } from './config.js';
 
-const CATEGORIES = [
+const CATEGORY_ORDER = [
   '法人税',
   '所得税',
   '消費税',
@@ -20,28 +17,25 @@ const CATEGORIES = [
   'その他',
 ];
 
-const SOURCE_LABELS = {
-  manual: '手動入力',
-  ai: 'AI提案',
+const CATEGORY_CLASS = {
+  法人税: 'cat-corporate',
+  所得税: 'cat-income',
+  消費税: 'cat-consumption',
+  '社会保険・労務': 'cat-social',
+  '電帳法・インボイス': 'cat-invoice',
+  業務手順: 'cat-workflow',
+  その他: 'cat-other',
 };
 
 const state = {
   knowledge: [],
+  activeTab: 'home',
   selectedKnowledgeId: null,
-  editingKnowledgeId: null,
-  filters: {
-    query: '',
-    category: 'all',
-    status: 'all',
-    sort: 'updated_at',
-  },
-  formCategoryManual: false,
+  searchQuery: '',
   suggestedCategory: 'その他',
-  formStatus: '',
+  noteStatus: '',
   configStatus: '',
-  loading: false,
-  pendingImageFile: null,
-  pendingImagePreviewUrl: '',
+  formCategoryManual: false,
 };
 
 const els = {
@@ -57,49 +51,42 @@ const els = {
   configReset: document.querySelector('#config-reset'),
   configStatus: document.querySelector('#config-status'),
   connectionModeLabel: document.querySelector('#connection-mode-label'),
-  metrics: document.querySelector('#metrics'),
+  headerPendingCount: document.querySelector('#header-pending-count'),
   heroSuggestionLabel: document.querySelector('#hero-suggestion-label'),
   heroPendingCount: document.querySelector('#hero-pending-count'),
+  tabButtons: [...document.querySelectorAll('.tab-button')],
+  homeScreen: document.querySelector('#home-screen'),
+  libraryScreen: document.querySelector('#library-screen'),
+  noteForm: document.querySelector('#note-form'),
+  noteBody: document.querySelector('#note-body'),
+  titlePreview: document.querySelector('#title-preview'),
+  noteCategory: document.querySelector('#note-category'),
+  applyAiCategory: document.querySelector('#apply-ai-category'),
+  predictedCategoryTag: document.querySelector('#predicted-category-tag'),
+  noteStatus: document.querySelector('#note-status'),
+  pendingList: document.querySelector('#pending-list'),
+  libraryEyebrow: document.querySelector('#library-eyebrow'),
+  libraryTitle: document.querySelector('#library-title'),
+  libraryCaption: document.querySelector('#library-caption'),
+  searchField: document.querySelector('#search-field'),
   searchInput: document.querySelector('#search-input'),
-  categoryFilter: document.querySelector('#category-filter'),
-  statusFilter: document.querySelector('#status-filter'),
-  sortSelect: document.querySelector('#sort-select'),
   knowledgeList: document.querySelector('#knowledge-list'),
   knowledgeDetail: document.querySelector('#knowledge-detail'),
-  pendingList: document.querySelector('#pending-list'),
-  formTitle: document.querySelector('#form-title'),
-  knowledgeForm: document.querySelector('#knowledge-form'),
-  knowledgeTitle: document.querySelector('#knowledge-title'),
-  knowledgeBody: document.querySelector('#knowledge-body'),
-  knowledgeCategory: document.querySelector('#knowledge-category'),
-  aiCategoryLabel: document.querySelector('#ai-category-label'),
-  applyAiCategory: document.querySelector('#apply-ai-category'),
-  knowledgeImageUrl: document.querySelector('#knowledge-image-url'),
-  knowledgeImageFile: document.querySelector('#knowledge-image-file'),
-  imagePreview: document.querySelector('#image-preview'),
-  imageUploadCaption: document.querySelector('#image-upload-caption'),
-  resetForm: document.querySelector('#reset-form'),
-  deleteKnowledge: document.querySelector('#delete-knowledge'),
-  formStatus: document.querySelector('#form-status'),
 };
 
 init();
 
 async function init() {
-  populateCategorySelects();
+  populateCategorySelect();
   bindEvents();
   hydrateConfigForm();
-  resetEditor();
+  resetComposer();
   registerServiceWorker();
   await refreshKnowledge();
 }
 
-function populateCategorySelects() {
-  els.categoryFilter.innerHTML = ['<option value="all">すべて</option>']
-    .concat(CATEGORIES.map((category) => `<option value="${category}">${category}</option>`))
-    .join('');
-
-  els.knowledgeCategory.innerHTML = CATEGORIES.map(
+function populateCategorySelect() {
+  els.noteCategory.innerHTML = CATEGORY_ORDER.map(
     (category) => `<option value="${category}">${category}</option>`,
   ).join('');
 }
@@ -111,16 +98,14 @@ function bindEvents() {
 
   els.configForm.addEventListener('submit', async (event) => {
     event.preventDefault();
-
     saveAppConfig({
       supabaseUrl: els.configUrl.value.trim(),
       supabaseAnonKey: els.configAnonKey.value.trim(),
       useMockData: els.configMockMode.checked,
     });
-
     state.configStatus = '接続設定を保存しました。';
-    renderConfigPanel();
     setSettingsOpen(false);
+    renderConfigPanel();
     await refreshKnowledge();
   });
 
@@ -136,30 +121,28 @@ function bindEvents() {
     await refreshKnowledge();
   });
 
-  els.searchInput.addEventListener('input', () => {
-    state.filters.query = els.searchInput.value.trim();
-    renderExplorer();
+  els.tabButtons.forEach((button) => {
+    button.addEventListener('click', () => setActiveTab(button.dataset.tab));
   });
 
-  els.categoryFilter.addEventListener('change', () => {
-    state.filters.category = els.categoryFilter.value;
-    renderExplorer();
+  els.noteBody.addEventListener('input', () => {
+    updateSuggestedCategory();
   });
 
-  els.statusFilter.addEventListener('change', () => {
-    state.filters.status = els.statusFilter.value;
-    renderExplorer();
+  els.noteCategory.addEventListener('change', () => {
+    state.formCategoryManual = true;
+    renderHome();
   });
 
-  els.sortSelect.addEventListener('change', () => {
-    state.filters.sort = els.sortSelect.value;
-    renderExplorer();
+  els.applyAiCategory.addEventListener('click', () => {
+    state.formCategoryManual = false;
+    els.noteCategory.value = state.suggestedCategory;
+    renderHome();
   });
 
-  els.knowledgeList.addEventListener('click', (event) => {
-    const trigger = event.target.closest('[data-knowledge-id]');
-    if (!trigger) return;
-    selectKnowledge(trigger.dataset.knowledgeId);
+  els.noteForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await handleSaveNote();
   });
 
   els.pendingList.addEventListener('click', async (event) => {
@@ -170,7 +153,7 @@ function bindEvents() {
     const action = trigger.dataset.action;
 
     if (action === 'view') {
-      selectKnowledge(knowledgeId);
+      openKnowledgeInCategory(knowledgeId);
       return;
     }
 
@@ -184,118 +167,36 @@ function bindEvents() {
     }
   });
 
-  els.knowledgeForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    await handleSave();
+  els.knowledgeList.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-knowledge-id]');
+    if (!trigger) return;
+    state.selectedKnowledgeId = trigger.dataset.knowledgeId;
+    renderLibrary();
   });
 
-  els.resetForm.addEventListener('click', () => {
-    resetEditor();
-    renderForm();
-  });
-
-  els.deleteKnowledge.addEventListener('click', async () => {
-    if (!state.editingKnowledgeId) {
-      state.formStatus = '削除するナレッジを選択してください。';
-      renderForm();
-      return;
-    }
-
-    const target = getKnowledgeById(state.editingKnowledgeId);
-    if (!target) return;
-
-    if (!window.confirm(`「${target.title}」を削除します。よろしいですか？`)) return;
-
-    try {
-      await deleteKnowledge(target.id);
-      state.formStatus = 'ナレッジを削除しました。';
-      state.selectedKnowledgeId = state.selectedKnowledgeId === target.id ? null : state.selectedKnowledgeId;
-      resetEditor();
-      await refreshKnowledge();
-    } catch (error) {
-      state.formStatus = error.message;
-      renderForm();
-    }
-  });
-
-  [els.knowledgeTitle, els.knowledgeBody].forEach((input) => {
-    input.addEventListener('input', () => {
-      updateSuggestedCategory();
-    });
-  });
-
-  els.knowledgeCategory.addEventListener('change', () => {
-    state.formCategoryManual = true;
-    renderForm();
-  });
-
-  els.applyAiCategory.addEventListener('click', () => {
-    state.formCategoryManual = false;
-    els.knowledgeCategory.value = state.suggestedCategory;
-    renderForm();
-  });
-
-  els.knowledgeImageUrl.addEventListener('input', () => {
-    clearPendingImageSelection({ keepFileInput: false });
-    renderImagePreview(els.knowledgeImageUrl.value.trim());
-  });
-
-  els.knowledgeImageFile.addEventListener('change', async () => {
-    const [file] = els.knowledgeImageFile.files ?? [];
-    if (!file) {
-      clearPendingImageSelection({ keepFileInput: true });
-      renderForm();
-      return;
-    }
-
-    if (!file.type.startsWith('image/')) {
-      clearPendingImageSelection({ keepFileInput: false });
-      state.formStatus = '画像ファイルを選択してください。';
-      renderForm();
-      return;
-    }
-
-    setPendingImageFile(file);
-    state.formStatus = '画像は保存時に Supabase Storage へアップロードされます。';
-    renderForm();
+  els.searchInput.addEventListener('input', () => {
+    state.searchQuery = els.searchInput.value.trim();
+    renderLibrary();
   });
 }
 
 async function refreshKnowledge() {
-  state.loading = true;
-  renderMetrics();
-  renderExplorer();
-  renderDetail();
-  renderPending();
-
   try {
     state.knowledge = await loadKnowledge();
-    if (!getKnowledgeById(state.selectedKnowledgeId)) {
-      state.selectedKnowledgeId = state.knowledge[0]?.id ?? null;
-    }
-    if (state.editingKnowledgeId) {
-      const editing = getKnowledgeById(state.editingKnowledgeId);
-      if (editing) {
-        loadEditor(editing);
-      }
-    }
-    renderAll();
   } catch (error) {
-    state.formStatus = error.message;
-    renderAll();
-  } finally {
-    state.loading = false;
-    renderAll();
+    state.noteStatus = error.message;
   }
+
+  ensureSelectionForActiveTab();
+  renderAll();
 }
 
 function renderAll() {
   renderConfigPanel();
-  renderMetrics();
-  renderExplorer();
-  renderDetail();
-  renderPending();
-  renderForm();
+  renderHeader();
+  renderTabs();
+  renderHome();
+  renderLibrary();
 }
 
 function renderConfigPanel() {
@@ -304,116 +205,89 @@ function renderConfigPanel() {
   els.configStatus.textContent = state.configStatus;
 }
 
-function hydrateConfigForm() {
-  const config = readAppConfig();
-  els.configUrl.value = config.supabaseUrl ?? '';
-  els.configAnonKey.value = config.supabaseAnonKey ?? '';
-  els.configMockMode.checked = Boolean(config.useMockData);
+function renderHeader() {
+  const pendingCount = pendingKnowledge().length;
+  els.headerPendingCount.textContent = `${pendingCount}件`;
+  els.heroPendingCount.textContent = `${pendingCount}件`;
+  els.heroSuggestionLabel.textContent = state.suggestedCategory;
 }
 
-function renderMetrics() {
-  const published = state.knowledge.filter((item) => !item.is_pending);
-  const pending = state.knowledge.filter((item) => item.is_pending);
-  const categoryCount = new Set(published.map((item) => item.category)).size;
-  const updatedThisWeek = published.filter((item) => isWithinDays(item.updated_at, 7)).length;
-
-  els.metrics.innerHTML = [
-    metricCard('登録済みナレッジ', `${published.length}件`, '公開済みの記事数'),
-    metricCard('承認待ち提案', `${pending.length}件`, 'Agent 17 からの保存提案'),
-    metricCard('利用カテゴリ数', `${categoryCount}種`, '現在使われているカテゴリ'),
-    metricCard('今週の更新', `${updatedThisWeek}件`, '直近7日で更新された記事'),
-  ].join('');
-
-  els.heroPendingCount.textContent = `${pending.length}件`;
+function renderTabs() {
+  els.tabButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.tab === state.activeTab);
+  });
 }
 
-function metricCard(label, value, caption) {
-  return `
-    <article class="metric-card">
-      <span class="eyebrow">${label}</span>
-      <strong>${value}</strong>
-      <p class="helper-text">${caption}</p>
-    </article>
-  `;
+function renderHome() {
+  const isActive = state.activeTab === 'home';
+  els.homeScreen.hidden = !isActive;
+  if (!isActive) return;
+
+  const title = buildAutoTitle(els.noteBody.value.trim());
+  els.titlePreview.textContent = `タイトル候補: ${title}`;
+  els.noteStatus.textContent = state.noteStatus;
+  els.predictedCategoryTag.innerHTML = categoryTag(state.suggestedCategory);
+
+  if (!state.formCategoryManual) {
+    els.noteCategory.value = state.suggestedCategory;
+  }
+
+  renderPendingList();
 }
 
-function renderExplorer() {
-  const items = filteredKnowledge();
+function renderLibrary() {
+  const isActive = state.activeTab !== 'home';
+  els.libraryScreen.hidden = !isActive;
+  if (!isActive) return;
+
+  const items = visibleKnowledgeForActiveTab();
+  ensureSelection(items);
+  renderLibraryHeader(items);
+  renderKnowledgeList(items);
+  renderDetail(items);
+}
+
+function renderLibraryHeader(items) {
+  const isSearch = state.activeTab === 'search';
+  els.libraryEyebrow.textContent = isSearch ? 'Search' : 'Category';
+  els.libraryTitle.textContent = isSearch ? '横断検索' : state.activeTab;
+  els.searchField.hidden = !isSearch;
+  els.searchInput.value = state.searchQuery;
+
+  if (isSearch) {
+    if (state.searchQuery) {
+      els.libraryCaption.textContent = `「${state.searchQuery}」の検索結果 ${items.length}件`;
+    } else {
+      els.libraryCaption.textContent = 'キーワードを入力すると、全カテゴリを横断して検索できます。';
+    }
+    return;
+  }
+
+  els.libraryCaption.textContent = `${state.activeTab}のナレッジを新しい順で表示しています。`;
+}
+
+function renderPendingList() {
+  const items = pendingKnowledge();
 
   if (!items.length) {
-    els.knowledgeList.innerHTML = '<div class="empty-card">条件に合うナレッジが見つかりません。</div>';
-    return;
-  }
-
-  els.knowledgeList.innerHTML = items
-    .map((item) => {
-      const summary = escapeHtml(trimText(item.body, 110));
-      return `
-        <button class="knowledge-card ${item.id === state.selectedKnowledgeId ? 'is-active' : ''}" type="button" data-knowledge-id="${item.id}">
-          <div class="knowledge-meta">
-            <span class="tag">${escapeHtml(item.category)}</span>
-            <span class="tag ${item.is_pending ? 'pending' : 'manual'}">${item.is_pending ? '承認待ち' : sourceLabel(item.source)}</span>
-          </div>
-          <h3>${escapeHtml(item.title)}</h3>
-          <p>${summary}</p>
-          <div class="knowledge-meta">
-            <span>登録: ${formatDate(item.created_at)}</span>
-            <span>更新: ${formatDate(item.updated_at)}</span>
-          </div>
-        </button>
-      `;
-    })
-    .join('');
-}
-
-function renderDetail() {
-  const knowledge = getKnowledgeById(state.selectedKnowledgeId);
-  if (!knowledge) {
-    els.knowledgeDetail.className = 'knowledge-detail empty-card';
-    els.knowledgeDetail.textContent = '一覧からナレッジを選択すると内容が表示されます。';
-    return;
-  }
-
-  const imageMarkup = knowledge.image_url
-    ? `<img class="knowledge-detail-image" src="${escapeAttribute(knowledge.image_url)}" alt="${escapeAttribute(knowledge.title)}" />`
-    : '';
-
-  els.knowledgeDetail.className = 'knowledge-detail';
-  els.knowledgeDetail.innerHTML = `
-    <div class="detail-meta">
-      <span class="tag">${escapeHtml(knowledge.category)}</span>
-      <span class="tag ${knowledge.is_pending ? 'pending' : 'manual'}">${knowledge.is_pending ? '承認待ち' : sourceLabel(knowledge.source)}</span>
-      <span>登録: ${formatDate(knowledge.created_at)}</span>
-      <span>更新: ${formatDate(knowledge.updated_at)}</span>
-    </div>
-    <h3>${escapeHtml(knowledge.title)}</h3>
-    ${imageMarkup}
-    <div class="knowledge-detail-body">${escapeHtml(knowledge.body)}</div>
-  `;
-}
-
-function renderPending() {
-  const pendingItems = state.knowledge.filter((item) => item.is_pending);
-
-  if (!pendingItems.length) {
     els.pendingList.innerHTML = '<div class="empty-card">承認待ちの提案はありません。</div>';
     return;
   }
 
-  els.pendingList.innerHTML = pendingItems
+  els.pendingList.innerHTML = items
     .map(
       (item) => `
         <article class="pending-card">
           <div class="pending-meta">
-            <span class="tag pending">承認待ち</span>
-            <span>${escapeHtml(item.category)}</span>
+            <span class="mini-badge pending">承認待ち</span>
+            ${categoryTag(item.category)}
             <span>提案日: ${formatDate(item.created_at)}</span>
           </div>
           <h3>${escapeHtml(item.title)}</h3>
-          <p>${escapeHtml(trimText(item.body, 160))}</p>
+          <p>${escapeHtml(trimText(item.body, 170))}</p>
           <div class="pending-actions">
             <button class="button ghost small" type="button" data-action="view" data-knowledge-id="${item.id}">内容を見る</button>
-            <button class="button primary small" type="button" data-action="approve" data-knowledge-id="${item.id}">承認して保存</button>
+            <button class="button primary small" type="button" data-action="approve" data-knowledge-id="${item.id}">承認</button>
             <button class="button danger small" type="button" data-action="reject" data-knowledge-id="${item.id}">却下</button>
           </div>
         </article>
@@ -422,88 +296,82 @@ function renderPending() {
     .join('');
 }
 
-function renderForm() {
-  const editing = getKnowledgeById(state.editingKnowledgeId);
-  els.formTitle.textContent = editing ? 'ナレッジ編集' : 'ナレッジ登録';
-  els.aiCategoryLabel.textContent = state.suggestedCategory;
-  els.heroSuggestionLabel.textContent = state.suggestedCategory;
-  els.formStatus.textContent = state.formStatus;
-  els.imageUploadCaption.textContent =
-    state.pendingImageFile
-      ? `選択中: ${state.pendingImageFile.name} を保存時にアップロードします。`
-      : getConnectionMode() === 'supabase'
-        ? 'Supabase 接続時は画像ファイルを Storage に保存し、image_url には公開URLを記録します。'
-        : 'モックモードでは画像ファイルをローカル保存用の data URL として保持します。';
-  renderImagePreview(els.knowledgeImageUrl.value.trim());
+function renderKnowledgeList(items) {
+  if (state.activeTab === 'search' && !state.searchQuery) {
+    els.knowledgeList.innerHTML = '<div class="empty-card">キーワードを入力すると検索結果がここに表示されます。</div>';
+    return;
+  }
+
+  if (!items.length) {
+    els.knowledgeList.innerHTML = '<div class="empty-card">該当するナレッジはまだありません。</div>';
+    return;
+  }
+
+  els.knowledgeList.innerHTML = items
+    .map(
+      (item) => `
+        <button class="knowledge-card ${item.id === state.selectedKnowledgeId ? 'is-active' : ''}" type="button" data-knowledge-id="${item.id}">
+          <div class="knowledge-meta">
+            ${categoryTag(item.category)}
+            <span>${formatDate(item.created_at)}</span>
+          </div>
+          <h3>${escapeHtml(item.title)}</h3>
+          <p>${escapeHtml(trimText(item.body, 120))}</p>
+        </button>
+      `,
+    )
+    .join('');
 }
 
-function resetEditor() {
-  state.editingKnowledgeId = null;
-  state.formCategoryManual = false;
-  state.formStatus = '';
-  clearPendingImageSelection({ keepFileInput: false });
-  els.knowledgeForm.reset();
-  els.knowledgeCategory.value = CATEGORIES[0];
-  updateSuggestedCategory();
+function renderDetail(items) {
+  const knowledge = items.find((item) => item.id === state.selectedKnowledgeId) ?? null;
+  if (!knowledge) {
+    els.knowledgeDetail.className = 'knowledge-detail empty-card';
+    els.knowledgeDetail.textContent = state.activeTab === 'search' && !state.searchQuery
+      ? 'キーワードを入力して検索すると、ここに詳細が表示されます。'
+      : '一覧からナレッジを選択すると内容が表示されます。';
+    return;
+  }
+
+  els.knowledgeDetail.className = 'knowledge-detail';
+  els.knowledgeDetail.innerHTML = `
+    <div class="detail-meta">
+      ${categoryTag(knowledge.category)}
+      <span>登録日: ${formatDate(knowledge.created_at)}</span>
+      <span>更新日: ${formatDate(knowledge.updated_at)}</span>
+    </div>
+    <h3>${escapeHtml(knowledge.title)}</h3>
+    <div class="knowledge-detail-body">${escapeHtml(knowledge.body)}</div>
+  `;
 }
 
-function loadEditor(knowledge) {
-  state.editingKnowledgeId = knowledge.id;
-  state.formStatus = '';
-  state.formCategoryManual = true;
-  clearPendingImageSelection({ keepFileInput: false });
-  els.knowledgeTitle.value = knowledge.title;
-  els.knowledgeBody.value = knowledge.body;
-  els.knowledgeCategory.value = knowledge.category;
-  els.knowledgeImageUrl.value = knowledge.image_url ?? '';
-  updateSuggestedCategory();
-}
+async function handleSaveNote() {
+  const body = els.noteBody.value.trim();
+  if (!body) {
+    state.noteStatus = 'ノート本文を入力してください。';
+    renderHome();
+    return;
+  }
 
-function selectKnowledge(knowledgeId) {
-  const knowledge = getKnowledgeById(knowledgeId);
-  if (!knowledge) return;
-  state.selectedKnowledgeId = knowledgeId;
-  loadEditor(knowledge);
-  renderAll();
-}
-
-async function handleSave() {
-  const payload = readFormPayload();
-  if (!payload) return;
+  const category = els.noteCategory.value || state.suggestedCategory;
+  const title = buildAutoTitle(body);
 
   try {
-    if (state.pendingImageFile) {
-      state.formStatus = '画像をアップロードしています...';
-      renderForm();
-      payload.image_url = await uploadKnowledgeImage(state.pendingImageFile, state.editingKnowledgeId);
-    }
+    const saved = await createKnowledge({
+      title,
+      body,
+      category,
+      source: 'manual',
+      is_pending: false,
+    });
 
-    let saved;
-
-    if (state.editingKnowledgeId) {
-      const original = getKnowledgeById(state.editingKnowledgeId);
-      saved = await updateKnowledge(state.editingKnowledgeId, {
-        ...payload,
-        source: original?.source ?? 'manual',
-        is_pending: original?.is_pending ?? false,
-      });
-      state.formStatus = 'ナレッジを更新しました。';
-    } else {
-      saved = await createKnowledge({
-        ...payload,
-        source: 'manual',
-        is_pending: false,
-      });
-      state.formStatus = 'ナレッジを登録しました。';
-    }
-
+    state.noteStatus = `「${saved.title}」を保存しました。`;
     state.selectedKnowledgeId = saved.id;
-    state.editingKnowledgeId = saved.id;
-    clearPendingImageSelection({ keepFileInput: false });
+    resetComposer();
     await refreshKnowledge();
   } catch (error) {
-    state.formStatus = error.message;
-    renderForm();
+    state.noteStatus = error.message;
+    renderHome();
   }
 }
 
@@ -512,16 +380,14 @@ async function handleApprove(knowledgeId) {
   if (!knowledge) return;
 
   try {
-    const approved = await approveKnowledge(knowledgeId, {
+    await approveKnowledge(knowledgeId, {
       category: knowledge.category || classifyCategory(knowledge.title, knowledge.body),
     });
-    state.selectedKnowledgeId = approved.id;
-    state.editingKnowledgeId = approved.id;
-    state.formStatus = 'AI提案を承認して保存しました。';
+    state.noteStatus = '承認待ちのナレッジを保存しました。';
     await refreshKnowledge();
   } catch (error) {
-    state.formStatus = error.message;
-    renderForm();
+    state.noteStatus = error.message;
+    renderHome();
   }
 }
 
@@ -532,76 +398,90 @@ async function handleReject(knowledgeId) {
 
   try {
     await rejectKnowledge(knowledgeId);
+    state.noteStatus = '承認待ちのナレッジを却下しました。';
     if (state.selectedKnowledgeId === knowledgeId) {
       state.selectedKnowledgeId = null;
     }
-    if (state.editingKnowledgeId === knowledgeId) {
-      resetEditor();
-    }
-    state.formStatus = 'AI提案を却下しました。';
     await refreshKnowledge();
   } catch (error) {
-    state.formStatus = error.message;
-    renderForm();
+    state.noteStatus = error.message;
+    renderHome();
   }
 }
 
-function readFormPayload() {
-  const title = els.knowledgeTitle.value.trim();
-  const body = els.knowledgeBody.value.trim();
-  const category = els.knowledgeCategory.value;
-  const imageUrl = els.knowledgeImageUrl.value.trim();
-
-  if (!title || !body) {
-    state.formStatus = 'タイトルと本文を入力してください。';
-    renderForm();
-    return null;
-  }
-
-  return {
-    title,
-    body,
-    category,
-    image_url: imageUrl,
-  };
+function openKnowledgeInCategory(knowledgeId) {
+  const knowledge = getKnowledgeById(knowledgeId);
+  if (!knowledge) return;
+  state.selectedKnowledgeId = knowledgeId;
+  setActiveTab(knowledge.category);
 }
 
-function filteredKnowledge() {
-  const query = state.filters.query.toLowerCase();
+function setActiveTab(tabId) {
+  state.activeTab = tabId;
+  ensureSelectionForActiveTab();
+  renderAll();
+}
 
-  return [...state.knowledge]
-    .filter((item) => {
-      if (state.filters.category !== 'all' && item.category !== state.filters.category) {
-        return false;
-      }
+function ensureSelectionForActiveTab() {
+  if (state.activeTab === 'home') return;
+  ensureSelection(visibleKnowledgeForActiveTab());
+}
 
-      if (state.filters.status === 'published' && item.is_pending) {
-        return false;
-      }
+function ensureSelection(items) {
+  if (items.some((item) => item.id === state.selectedKnowledgeId)) return;
+  state.selectedKnowledgeId = items[0]?.id ?? null;
+}
 
-      if (state.filters.status === 'pending' && !item.is_pending) {
-        return false;
-      }
+function visibleKnowledgeForActiveTab() {
+  const published = publishedKnowledge();
 
-      if (!query) {
-        return true;
-      }
-
-      const haystack = `${item.title}\n${item.body}`.toLowerCase();
+  if (state.activeTab === 'search') {
+    if (!state.searchQuery) return [];
+    const query = state.searchQuery.toLowerCase();
+    return published.filter((item) => {
+      const haystack = `${item.title}\n${item.body}\n${item.category}`.toLowerCase();
       return haystack.includes(query);
-    })
-    .sort((left, right) => {
-      const field = state.filters.sort;
-      return new Date(right[field]).getTime() - new Date(left[field]).getTime();
     });
+  }
+
+  return published.filter((item) => item.category === state.activeTab);
+}
+
+function pendingKnowledge() {
+  return [...state.knowledge]
+    .filter((item) => item.is_pending)
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+}
+
+function publishedKnowledge() {
+  return [...state.knowledge]
+    .filter((item) => !item.is_pending)
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+}
+
+function resetComposer() {
+  state.formCategoryManual = false;
+  els.noteBody.value = '';
+  updateSuggestedCategory();
 }
 
 function updateSuggestedCategory() {
-  state.suggestedCategory = classifyCategory(els.knowledgeTitle.value.trim(), els.knowledgeBody.value.trim());
+  const body = els.noteBody.value.trim();
+  const title = buildAutoTitle(body);
+  state.suggestedCategory = classifyCategory(title, body);
   if (!state.formCategoryManual) {
-    els.knowledgeCategory.value = state.suggestedCategory;
+    els.noteCategory.value = state.suggestedCategory;
   }
-  renderForm();
+  renderHome();
+}
+
+function buildAutoTitle(body) {
+  if (!body) return '無題ノート';
+  const firstLine = body
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+  return trimText(firstLine || body.replace(/\s+/g, ' ').trim(), 34) || '無題ノート';
 }
 
 function classifyCategory(title, body) {
@@ -625,12 +505,19 @@ function classifyCategory(title, body) {
   return 'その他';
 }
 
+function categoryTag(category) {
+  return `<span class="tag category-tag ${CATEGORY_CLASS[category] ?? 'cat-other'}">${escapeHtml(category)}</span>`;
+}
+
 function getKnowledgeById(id) {
   return state.knowledge.find((item) => item.id === id) ?? null;
 }
 
-function sourceLabel(source) {
-  return SOURCE_LABELS[source] ?? source ?? '未設定';
+function hydrateConfigForm() {
+  const config = readAppConfig();
+  els.configUrl.value = config.supabaseUrl ?? '';
+  els.configAnonKey.value = config.supabaseAnonKey ?? '';
+  els.configMockMode.checked = Boolean(config.useMockData);
 }
 
 function setSettingsOpen(open) {
@@ -639,33 +526,13 @@ function setSettingsOpen(open) {
   els.settingsPanel.setAttribute('aria-hidden', String(!open));
 }
 
-function renderImagePreview(url) {
-  const previewUrl = state.pendingImagePreviewUrl || url;
-
-  if (!previewUrl) {
-    els.imagePreview.className = 'image-preview empty-card';
-    els.imagePreview.textContent = '画像を登録するとここにプレビューが表示されます。';
-    return;
-  }
-
-  els.imagePreview.className = 'image-preview';
-  els.imagePreview.innerHTML = `<img class="preview-image" src="${escapeAttribute(previewUrl)}" alt="プレビュー画像" />`;
-}
-
 function formatDate(value) {
   if (!value) return '未設定';
-  const date = new Date(value);
   return new Intl.DateTimeFormat('ja-JP', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(date);
-}
-
-function isWithinDays(value, days) {
-  if (!value) return false;
-  const diff = Date.now() - new Date(value).getTime();
-  return diff <= days * 24 * 60 * 60 * 1000;
+  }).format(new Date(value));
 }
 
 function trimText(text, maxLength) {
@@ -680,29 +547,6 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
-}
-
-function escapeAttribute(value) {
-  return escapeHtml(value).replaceAll('\n', '&#10;');
-}
-
-function setPendingImageFile(file) {
-  clearPendingImageSelection({ keepFileInput: true });
-  state.pendingImageFile = file;
-  state.pendingImagePreviewUrl = URL.createObjectURL(file);
-}
-
-function clearPendingImageSelection({ keepFileInput }) {
-  if (state.pendingImagePreviewUrl) {
-    URL.revokeObjectURL(state.pendingImagePreviewUrl);
-  }
-
-  state.pendingImageFile = null;
-  state.pendingImagePreviewUrl = '';
-
-  if (!keepFileInput) {
-    els.knowledgeImageFile.value = '';
-  }
 }
 
 function registerServiceWorker() {

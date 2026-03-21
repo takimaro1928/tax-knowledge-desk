@@ -6,11 +6,11 @@
     <meta name="theme-color" content="#8a6846" />
     <meta
       name="description"
-      content="税理士事務所向けのナレッジ管理アプリ。業務手順や税務メモを登録・検索・承認できます。"
+      content="税理士事務所向けのナレッジ管理アプリ。ノートを自由に書き込むだけでカテゴリ判定し、検索と一覧で蓄積できます。"
     />
-    <link rel="manifest" href="./manifest.webmanifest?v=20260320-knowledge" />
-    <link rel="stylesheet" href="./styles.css?v=20260320-knowledge" />
-    <title>Tax Knowledge Desk</title>
+    <link rel="manifest" href="./manifest.webmanifest?v=20260321-knowledge" />
+    <link rel="stylesheet" href="./styles.css?v=20260321-knowledge" />
+    <title>Knowledge Desk</title>
   </head>
   <body>
     <div class="app-shell">
@@ -51,9 +51,9 @@
 
       <header class="app-header">
         <div class="brand-block">
-          <p class="eyebrow">Tax Knowledge Desk</p>
+          <p class="eyebrow">Knowledge Desk</p>
           <h1>税理士事務所ナレッジベース</h1>
-          <p class="subtitle">調べたこと、判断メモ、業務手順をチームで蓄積してすぐ探せる社内Wiki</p>
+          <p class="subtitle">ノートに自由に書くだけでカテゴリを自動判定し、カテゴリ別と横断検索で知識を蓄積する社内Wiki</p>
         </div>
 
         <div class="header-actions">
@@ -61,160 +61,141 @@
             <span class="chip-label">接続先</span>
             <strong id="connection-mode-label">モック</strong>
           </div>
+          <div class="connection-chip pending-chip">
+            <span class="chip-label">承認待ち</span>
+            <strong id="header-pending-count">0件</strong>
+          </div>
           <button id="settings-open" class="button ghost" type="button">接続設定</button>
         </div>
       </header>
 
-      <section class="hero-card">
-        <div class="hero-copy">
-          <h2>税務・労務・手順書を、1つの画面で登録してすぐ引ける。</h2>
-          <p>
-            ナレッジの登録、AIによるカテゴリ提案、承認待ちの確認までを一元化。Slack 上の Agent 17 提案も、
-            アプリ側で承認してそのままデータベースへ保存できます。
-          </p>
-        </div>
-        <div class="hero-aside">
-          <div class="hero-note">
-            <span>カテゴリ自動判定</span>
-            <strong id="hero-suggestion-label">その他</strong>
-          </div>
-          <div class="hero-note">
-            <span>承認待ち</span>
-            <strong id="hero-pending-count">0件</strong>
-          </div>
-        </div>
-      </section>
+      <nav class="tab-bar" aria-label="画面タブ">
+        <button class="tab-button is-active" type="button" data-tab="home">ホーム</button>
+        <button class="tab-button" type="button" data-tab="法人税">法人税</button>
+        <button class="tab-button" type="button" data-tab="所得税">所得税</button>
+        <button class="tab-button" type="button" data-tab="消費税">消費税</button>
+        <button class="tab-button" type="button" data-tab="社会保険・労務">社会保険・労務</button>
+        <button class="tab-button" type="button" data-tab="電帳法・インボイス">電帳法・インボイス</button>
+        <button class="tab-button" type="button" data-tab="業務手順">業務手順</button>
+        <button class="tab-button" type="button" data-tab="その他">その他</button>
+        <button class="tab-button" type="button" data-tab="search">検索</button>
+      </nav>
 
-      <section id="metrics" class="metrics-grid"></section>
-
-      <main class="workspace">
-        <section class="panel explorer-panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Search</p>
-              <h2>検索と一覧</h2>
+      <main class="main-stack">
+        <section id="home-screen" class="screen">
+          <section class="hero-card home-hero">
+            <div class="hero-copy">
+              <h2>まずはメモを残す。分類はあとから整う。</h2>
+              <p>
+                調べたことや業務手順をそのままノートに書き込むだけで、カテゴリを自動判定して保存できます。
+                タグが違うときはその場で手動変更し、カテゴリ別一覧と検索タブからあとで素早く見返せます。
+              </p>
             </div>
-          </div>
-
-          <div class="toolbar">
-            <label class="field field-full">
-              <span>キーワード検索</span>
-              <input id="search-input" type="search" placeholder="例: インボイス 登録番号 / 年末調整 / 電帳法" />
-            </label>
-
-            <div class="filter-grid">
-              <label class="field">
-                <span>カテゴリ</span>
-                <select id="category-filter"></select>
-              </label>
-
-              <label class="field">
-                <span>表示</span>
-                <select id="status-filter">
-                  <option value="all">すべて</option>
-                  <option value="published">公開済みのみ</option>
-                  <option value="pending">承認待ちのみ</option>
-                </select>
-              </label>
-
-              <label class="field">
-                <span>並び順</span>
-                <select id="sort-select">
-                  <option value="updated_at">更新日順</option>
-                  <option value="created_at">登録日順</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <div id="knowledge-list" class="knowledge-list"></div>
-        </section>
-
-        <section class="detail-column">
-          <section class="panel detail-panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Detail</p>
-                <h2>ナレッジ詳細</h2>
+            <div class="hero-aside">
+              <div class="hero-note">
+                <span>AI判定</span>
+                <strong id="hero-suggestion-label">その他</strong>
+              </div>
+              <div class="hero-note hero-note-pending">
+                <span>承認待ち件数</span>
+                <strong id="hero-pending-count">0件</strong>
               </div>
             </div>
-            <article id="knowledge-detail" class="knowledge-detail empty-card">
-              一覧からナレッジを選択すると内容が表示されます。
-            </article>
           </section>
 
-          <section class="panel form-panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Editor</p>
-                <h2 id="form-title">ナレッジ登録</h2>
-              </div>
-              <button id="reset-form" class="button ghost small" type="button">新規作成</button>
-            </div>
-
-            <form id="knowledge-form" class="form-grid">
-              <label class="field field-full">
-                <span>タイトル</span>
-                <input id="knowledge-title" name="title" type="text" required placeholder="例: インボイス制度で登録番号が不要なケース" />
-              </label>
-
-              <label class="field field-full">
-                <span>本文</span>
-                <textarea id="knowledge-body" name="body" rows="10" required placeholder="調べた内容、結論、根拠、手順を記録"></textarea>
-              </label>
-
-              <label class="field">
-                <span>カテゴリ</span>
-                <select id="knowledge-category" name="category"></select>
-              </label>
-
-              <div class="field ai-field">
-                <span>AI判定</span>
-                <div class="ai-inline">
-                  <strong id="ai-category-label">その他</strong>
-                  <button id="apply-ai-category" class="button ghost small" type="button">AI判定に戻す</button>
+          <section class="home-center">
+            <form id="note-form" class="panel composer-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Home</p>
+                  <h2>自由ノート</h2>
                 </div>
               </div>
 
-              <label class="field field-full">
-                <span>画像URL</span>
-                <input id="knowledge-image-url" name="image_url" type="url" placeholder="https://... または画像アップロードを利用" />
-              </label>
+              <p class="helper-text">タイトルは本文の先頭から自動生成します。まずはノート本文だけ書けば大丈夫です。</p>
+              <div id="title-preview" class="title-preview">タイトル候補: 無題ノート</div>
 
               <label class="field field-full">
-                <span>画像アップロード</span>
-                <input id="knowledge-image-file" type="file" accept="image/*" />
+                <span>ノート本文</span>
+                <textarea
+                  id="note-body"
+                  rows="12"
+                  placeholder="例: 役員報酬改定の判定手順、インボイスの特例、算定基礎届の確認メモなどを自由に記録"
+                ></textarea>
               </label>
 
-              <p id="image-upload-caption" class="helper-text field-full">
-                Supabase 接続時は画像ファイルを Storage に保存し、image_url には公開URLを記録します。
-              </p>
+              <div class="composer-footer">
+                <div class="composer-meta">
+                  <div class="category-prediction">
+                    <span class="field-label">AI判定</span>
+                    <div id="predicted-category-tag"></div>
+                  </div>
 
-              <div id="image-preview" class="image-preview empty-card">画像を登録するとここにプレビューが表示されます。</div>
+                  <label class="field compact-field">
+                    <span>カテゴリ変更</span>
+                    <select id="note-category"></select>
+                  </label>
 
-              <div class="button-row">
+                  <button id="apply-ai-category" class="button ghost small" type="button">AI判定に戻す</button>
+                </div>
+
                 <button class="button primary" type="submit">保存</button>
-                <button id="delete-knowledge" class="button danger" type="button">削除</button>
               </div>
-              <p id="form-status" class="helper-text"></p>
+              <p id="note-status" class="helper-text"></p>
             </form>
+          </section>
+
+          <section class="panel pending-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Pending</p>
+                <h2>承認待ち一覧</h2>
+              </div>
+              <p class="helper-text">チップ（Agent 17）が Slack で提案したナレッジ候補をここで承認・却下します。</p>
+            </div>
+            <div id="pending-list" class="pending-list"></div>
+          </section>
+        </section>
+
+        <section id="library-screen" class="screen" hidden>
+          <section class="panel library-header-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow" id="library-eyebrow">Category</p>
+                <h2 id="library-title">法人税</h2>
+              </div>
+            </div>
+
+            <label id="search-field" class="field field-full" hidden>
+              <span>キーワード検索</span>
+              <input id="search-input" type="search" placeholder="例: 年末調整 / インボイス / 算定基礎 / 役員報酬" />
+            </label>
+
+            <p id="library-caption" class="helper-text"></p>
+          </section>
+
+          <section class="library-layout">
+            <section class="panel list-panel">
+              <div id="knowledge-list" class="knowledge-list"></div>
+            </section>
+
+            <section class="panel detail-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Detail</p>
+                  <h2>ナレッジ詳細</h2>
+                </div>
+              </div>
+              <article id="knowledge-detail" class="knowledge-detail empty-card">
+                一覧からナレッジを選択すると内容が表示されます。
+              </article>
+            </section>
           </section>
         </section>
       </main>
-
-      <section class="panel pending-panel">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">Agent 17</p>
-            <h2>AIからの保存提案</h2>
-          </div>
-          <p class="helper-text">Slack で届いた「保存しますか？」提案をここで承認・却下します。</p>
-        </div>
-        <div id="pending-list" class="pending-list"></div>
-      </section>
     </div>
 
     <script src="./config.local.js"></script>
-    <script type="module" src="./app.js?v=20260320-knowledge"></script>
+    <script type="module" src="./app.js?v=20260321-knowledge"></script>
   </body>
 </html>
