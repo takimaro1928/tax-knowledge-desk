@@ -42,3 +42,37 @@ for all
 to anon, authenticated
 using (true)
 with check (true);
+
+insert into storage.buckets (id, name, public)
+values ('knowledge-images', 'knowledge-images', true)
+on conflict (id) do update
+set public = excluded.public;
+
+drop policy if exists "knowledge images public read" on storage.objects;
+create policy "knowledge images public read"
+on storage.objects
+for select
+to anon, authenticated
+using (bucket_id = 'knowledge-images');
+
+drop policy if exists "knowledge images public insert" on storage.objects;
+create policy "knowledge images public insert"
+on storage.objects
+for insert
+to anon, authenticated
+with check (bucket_id = 'knowledge-images');
+
+drop policy if exists "knowledge images public update" on storage.objects;
+create policy "knowledge images public update"
+on storage.objects
+for update
+to anon, authenticated
+using (bucket_id = 'knowledge-images')
+with check (bucket_id = 'knowledge-images');
+
+drop policy if exists "knowledge images public delete" on storage.objects;
+create policy "knowledge images public delete"
+on storage.objects
+for delete
+to anon, authenticated
+using (bucket_id = 'knowledge-images');

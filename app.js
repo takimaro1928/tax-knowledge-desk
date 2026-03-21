@@ -5,6 +5,7 @@ import {
   getConnectionMode,
   loadKnowledge,
   rejectKnowledge,
+  uploadKnowledgeImage,
   updateKnowledge,
 } from './api.js';
 import { readAppConfig, saveAppConfig } from './config.js';
@@ -39,6 +40,8 @@ const state = {
   formStatus: '',
   configStatus: '',
   loading: false,
+  pendingImageFile: null,
+  pendingImagePreviewUrl: '',
 };
 
 const els = {
@@ -74,6 +77,7 @@ const els = {
   knowledgeImageUrl: document.querySelector('#knowledge-image-url'),
   knowledgeImageFile: document.querySelector('#knowledge-image-file'),
   imagePreview: document.querySelector('#image-preview'),
+  imageUploadCaption: document.querySelector('#image-upload-caption'),
   resetForm: document.querySelector('#reset-form'),
   deleteKnowledge: document.querySelector('#delete-knowledge'),
   formStatus: document.querySelector('#form-status'),
@@ -232,21 +236,28 @@ function bindEvents() {
   });
 
   els.knowledgeImageUrl.addEventListener('input', () => {
+    clearPendingImageSelection({ keepFileInput: false });
     renderImagePreview(els.knowledgeImageUrl.value.trim());
   });
 
   els.knowledgeImageFile.addEventListener('change', async () => {
     const [file] = els.knowledgeImageFile.files ?? [];
-    if (!file) return;
-
-    try {
-      const dataUrl = await fileToDataUrl(file);
-      els.knowledgeImageUrl.value = dataUrl;
-      renderImagePreview(dataUrl);
-    } catch (error) {
-      state.formStatus = error.message;
+    if (!file) {
+      clearPendingImageSelection({ keepFileInput: true });
       renderForm();
+      return;
     }
+
+    if (!file.type.startsWith('image/')) {
+      clearPendingImageSelection({ keepFileInput: false });
+      state.formStatus = '画像ファイルを選択してください。';
+      renderForm();
+      return;
+    }
+
+    setPendingImageFile(file);
+    state.formStatus = '画像は保存時に Supabase Storage へアップロードされます。';
+    renderForm();
   });
 }
 
@@ -417,6 +428,12 @@ function renderForm() {
   els.aiCategoryLabel.textContent = state.suggestedCategory;
   els.heroSuggestionLabel.textContent = state.suggestedCategory;
   els.formStatus.textContent = state.formStatus;
+  els.imageUploadCaption.textContent =
+    state.pendingImageFile
+      ? `選択中: ${state.pendingImageFile.name} を保存時にアップロードします。`
+      : getConnectionMode() === 'supabase'
+        ? 'Supabase 接続時は画像ファイルを Storage に保存し、image_url には公開URLを記録します。'
+        : 'モックモードでは画像ファイルをローカル保存用の data URL として保持します。';
   renderImagePreview(els.knowledgeImageUrl.value.trim());
 }
 
@@ -424,9 +441,9 @@ function resetEditor() {
   state.editingKnowledgeId = null;
   state.formCategoryManual = false;
   state.formStatus = '';
+  clearPendingImageSelection({ keepFileInput: false });
   els.knowledgeForm.reset();
   els.knowledgeCategory.value = CATEGORIES[0];
-  els.knowledgeImageFile.value = '';
   updateSuggestedCategory();
 }
 
@@ -434,11 +451,11 @@ function loadEditor(knowledge) {
   state.editingKnowledgeId = knowledge.id;
   state.formStatus = '';
   state.formCategoryManual = true;
+  clearPendingImageSelection({ keepFileInput: false });
   els.knowledgeTitle.value = knowledge.title;
   els.knowledgeBody.value = knowledge.body;
   els.knowledgeCategory.value = knowledge.category;
   els.knowledgeImageUrl.value = knowledge.image_url ?? '';
-  els.knowledgeImageFile.value = '';
   updateSuggestedCategory();
 }
 
@@ -455,6 +472,12 @@ async function handleSave() {
   if (!payload) return;
 
   try {
+    if (state.pendingImageFile) {
+      state.formStatus = '画像をアップロードしています...';
+      renderForm();
+      payload.image_url = await uploadKnowledgeImage(state.pendingImageFile, state.editingKnowledgeId);
+    }
+
     let saved;
 
     if (state.editingKnowledgeId) {
@@ -476,6 +499,7 @@ async function handleSave() {
 
     state.selectedKnowledgeId = saved.id;
     state.editingKnowledgeId = saved.id;
+    clearPendingImageSelection({ keepFileInput: false });
     await refreshKnowledge();
   } catch (error) {
     state.formStatus = error.message;
@@ -616,14 +640,16 @@ function setSettingsOpen(open) {
 }
 
 function renderImagePreview(url) {
-  if (!url) {
+  const previewUrl = state.pendingImagePreviewUrl || url;
+
+  if (!previewUrl) {
     els.imagePreview.className = 'image-preview empty-card';
     els.imagePreview.textContent = '画像を登録するとここにプレビューが表示されます。';
     return;
   }
 
   els.imagePreview.className = 'image-preview';
-  els.imagePreview.innerHTML = `<img class="preview-image" src="${escapeAttribute(url)}" alt="プレビュー画像" />`;
+  els.imagePreview.innerHTML = `<img class="preview-image" src="${escapeAttribute(previewUrl)}" alt="プレビュー画像" />`;
 }
 
 function formatDate(value) {
@@ -660,13 +686,23 @@ function escapeAttribute(value) {
   return escapeHtml(value).replaceAll('\n', '&#10;');
 }
 
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(new Error('画像の読み込みに失敗しました。'));
-    reader.readAsDataURL(file);
-  });
+function setPendingImageFile(file) {
+  clearPendingImageSelection({ keepFileInput: true });
+  state.pendingImageFile = file;
+  state.pendingImagePreviewUrl = URL.createObjectURL(file);
+}
+
+function clearPendingImageSelection({ keepFileInput }) {
+  if (state.pendingImagePreviewUrl) {
+    URL.revokeObjectURL(state.pendingImagePreviewUrl);
+  }
+
+  state.pendingImageFile = null;
+  state.pendingImagePreviewUrl = '';
+
+  if (!keepFileInput) {
+    els.knowledgeImageFile.value = '';
+  }
 }
 
 function registerServiceWorker() {

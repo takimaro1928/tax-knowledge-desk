@@ -7,7 +7,8 @@
 
 - ナレッジの登録
   - タイトル、本文、画像URLを保存
-  - 画像ファイルを読み込んで `data:` URL として保存可能
+  - 画像ファイルは Supabase Storage に保存し、`image_url` には公開URLを保存
+  - モックモードでは画像ファイルを `data:` URL として保持
   - 本文からカテゴリを自動判定し、必要に応じて手動変更
 - ナレッジの検索・閲覧
   - キーワード検索
@@ -24,7 +25,7 @@
 
 - フロント: HTML / CSS / Vanilla JavaScript
 - データベース: Supabase
-- 通信: Supabase REST API
+- 通信: Supabase REST API / Storage API
 - 配色: ベージュ・ブラウン系のアースカラー
 
 ## ローカル起動
@@ -63,6 +64,10 @@ python3 -m http.server 4173
   - `created_at`
   - `updated_at`
 
+- Storage bucket
+  - `knowledge-images`
+  - 公開バケットとして画像を保存
+
 ## 補足
 
 - カテゴリは以下の初期値を画面で提供しています
@@ -75,4 +80,4 @@ python3 -m http.server 4173
   - その他
 - `category` は `text` 型なので、今後カテゴリを増やしてもスキーマ変更は不要です
 - サンプルのモックデータには、承認待ちの AI 提案が含まれています
-- 現在の `schema.sql` は `anon` でもアクセスできる設定です。公開運用時は認証や RLS の見直しを推奨します
+- 現在の `schema.sql` は `anon` でも `knowledge` と `knowledge-images` にアクセスできる設定です。公開運用時は認証や RLS の見直しを推奨します

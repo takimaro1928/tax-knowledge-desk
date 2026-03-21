@@ -1,6 +1,7 @@
 import { APP_CONFIG } from './config.js';
 
 const MOCK_STORAGE_KEY = 'knowledge-desk-mock-store';
+const KNOWLEDGE_IMAGE_BUCKET = 'knowledge-images';
 
 class ApiError extends Error {
   constructor(message, code = 'API_ERROR', status = null) {
@@ -56,6 +57,33 @@ function mapApiError(response, rawText) {
   return new ApiError(message, code, response.status);
 }
 
+function mapStorageError(response, rawText) {
+  let message = rawText || `Storage request failed: ${response.status}`;
+
+  try {
+    const parsed = JSON.parse(rawText);
+    message = parsed.message ?? parsed.error ?? parsed.error_description ?? message;
+
+    if (typeof message === 'string' && message.toLowerCase().includes('bucket')) {
+      return new ApiError(
+        `Supabase Storage の ${KNOWLEDGE_IMAGE_BUCKET} バケットが見つかりません。schema.sql を実行してください。`,
+        'STORAGE_BUCKET_MISSING',
+        response.status,
+      );
+    }
+  } catch {
+    if (rawText && rawText.toLowerCase().includes('bucket')) {
+      return new ApiError(
+        `Supabase Storage の ${KNOWLEDGE_IMAGE_BUCKET} バケットが見つかりません。schema.sql を実行してください。`,
+        'STORAGE_BUCKET_MISSING',
+        response.status,
+      );
+    }
+  }
+
+  return new ApiError(message, 'STORAGE_ERROR', response.status);
+}
+
 async function request(path, init = {}) {
   const headers = {
     ...baseHeaders(),
@@ -83,6 +111,65 @@ async function request(path, init = {}) {
   }
 
   return response.json();
+}
+
+async function storageRequest(path, init = {}) {
+  const headers = {
+    ...baseHeaders(),
+    ...(init.headers ?? {}),
+  };
+
+  const response = await fetch(`${APP_CONFIG.supabaseUrl}/storage/v1${path}`, {
+    ...init,
+    headers,
+  });
+
+  if (!response.ok) {
+    const rawText = await response.text();
+    throw mapStorageError(response, rawText);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    return response.text();
+  }
+
+  return response.json();
+}
+
+function safeFileExtension(file) {
+  const byName = file.name?.includes('.') ? file.name.split('.').pop() : '';
+  if (byName) {
+    return String(byName).toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+  }
+
+  const byType = file.type?.split('/').pop();
+  return byType ? byType.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin' : 'bin';
+}
+
+function buildStoragePath(file, knowledgeId = null) {
+  const today = new Date().toISOString().slice(0, 10);
+  const extension = safeFileExtension(file);
+  const recordId = knowledgeId || createId();
+  const uploadId = createId();
+  return `knowledge/${today}/${recordId}/${uploadId}.${extension}`;
+}
+
+function buildPublicStorageUrl(path) {
+  return `${APP_CONFIG.supabaseUrl}/storage/v1/object/public/${KNOWLEDGE_IMAGE_BUCKET}/${path}`;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(new ApiError('画像の読み込みに失敗しました。', 'FILE_READ_ERROR'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function normalizeKnowledge(record) {
@@ -196,6 +283,32 @@ export async function loadKnowledge() {
 
   const payload = await request('/knowledge?select=*');
   return sortKnowledge(payload ?? []);
+}
+
+export async function uploadKnowledgeImage(file, knowledgeId = null) {
+  if (!(file instanceof File)) {
+    throw new ApiError('アップロードする画像ファイルが見つかりません。', 'FILE_MISSING');
+  }
+
+  if (!file.type.startsWith('image/')) {
+    throw new ApiError('画像ファイルを選択してください。', 'INVALID_FILE_TYPE');
+  }
+
+  if (!isRemoteConfigured()) {
+    return readFileAsDataUrl(file);
+  }
+
+  const path = buildStoragePath(file, knowledgeId);
+  await storageRequest(`/${['object', KNOWLEDGE_IMAGE_BUCKET, ...path.split('/')].map(encodeURIComponent).join('/')}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'x-upsert': 'true',
+    },
+    body: file,
+  });
+
+  return buildPublicStorageUrl(path);
 }
 
 export async function createKnowledge(input) {
