@@ -8,8 +8,8 @@
       name="description"
       content="税理士事務所向けのナレッジ管理アプリ。ノートを自由に書き込むだけでカテゴリ判定し、検索と一覧で蓄積できます。"
     />
-    <link rel="manifest" href="./manifest.webmanifest?v=20260321-knowledge" />
-    <link rel="stylesheet" href="./styles.css?v=20260321-knowledge" />
+    <link rel="manifest" href="./manifest.webmanifest?v=20260321-knowledge-final1" />
+    <link rel="stylesheet" href="./styles.css?v=20260321-knowledge-final1" />
     <title>Knowledge Desk</title>
   </head>
   <body>
@@ -79,30 +79,14 @@
         <button class="tab-button" type="button" data-tab="業務手順">業務手順</button>
         <button class="tab-button" type="button" data-tab="その他">その他</button>
         <button class="tab-button" type="button" data-tab="search">検索</button>
+        <button class="tab-button pending-tab-button" type="button" data-tab="pending">
+          <span>承認待ち</span>
+          <span id="pending-tab-badge" class="tab-badge" hidden>0</span>
+        </button>
       </nav>
 
       <main class="main-stack">
         <section id="home-screen" class="screen">
-          <section class="hero-card home-hero">
-            <div class="hero-copy">
-              <h2>まずはメモを残す。分類はあとから整う。</h2>
-              <p>
-                調べたことや業務手順をそのままノートに書き込むだけで、カテゴリを自動判定して保存できます。
-                タグが違うときはその場で手動変更し、カテゴリ別一覧と検索タブからあとで素早く見返せます。
-              </p>
-            </div>
-            <div class="hero-aside">
-              <div class="hero-note">
-                <span>AI判定</span>
-                <strong id="hero-suggestion-label">その他</strong>
-              </div>
-              <div class="hero-note hero-note-pending">
-                <span>承認待ち件数</span>
-                <strong id="hero-pending-count">0件</strong>
-              </div>
-            </div>
-          </section>
-
           <section class="home-center">
             <form id="note-form" class="panel composer-panel">
               <div class="panel-header">
@@ -141,19 +125,8 @@
 
                 <button class="button primary" type="submit">保存</button>
               </div>
-              <p id="note-status" class="helper-text"></p>
+              <p id="note-status" class="helper-text status-message" aria-live="polite"></p>
             </form>
-          </section>
-
-          <section class="panel pending-panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Pending</p>
-                <h2>承認待ち一覧</h2>
-              </div>
-              <p class="helper-text">チップ（Agent 17）が Slack で提案したナレッジ候補をここで承認・却下します。</p>
-            </div>
-            <div id="pending-list" class="pending-list"></div>
           </section>
         </section>
 
@@ -192,10 +165,23 @@
             </section>
           </section>
         </section>
+
+        <section id="pending-screen" class="screen" hidden>
+          <section class="panel pending-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Pending</p>
+                <h2>承認待ち一覧</h2>
+              </div>
+              <p class="helper-text">チップ（Agent 17）が Slack で提案したナレッジ候補をここで承認・却下します。</p>
+            </div>
+            <div id="pending-list" class="pending-list"></div>
+          </section>
+        </section>
       </main>
     </div>
 
     <script src="./config.local.js"></script>
-    <script type="module" src="./app.js?v=20260321-knowledge"></script>
+    <script type="module" src="./app.js?v=20260321-knowledge-final1"></script>
   </body>
 </html>

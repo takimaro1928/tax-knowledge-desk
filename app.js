@@ -34,6 +34,7 @@ const state = {
   searchQuery: '',
   suggestedCategory: 'その他',
   noteStatus: '',
+  noteStatusTone: 'neutral',
   configStatus: '',
   formCategoryManual: false,
 };
@@ -52,11 +53,11 @@ const els = {
   configStatus: document.querySelector('#config-status'),
   connectionModeLabel: document.querySelector('#connection-mode-label'),
   headerPendingCount: document.querySelector('#header-pending-count'),
-  heroSuggestionLabel: document.querySelector('#hero-suggestion-label'),
-  heroPendingCount: document.querySelector('#hero-pending-count'),
+  pendingTabBadge: document.querySelector('#pending-tab-badge'),
   tabButtons: [...document.querySelectorAll('.tab-button')],
   homeScreen: document.querySelector('#home-screen'),
   libraryScreen: document.querySelector('#library-screen'),
+  pendingScreen: document.querySelector('#pending-screen'),
   noteForm: document.querySelector('#note-form'),
   noteBody: document.querySelector('#note-body'),
   titlePreview: document.querySelector('#title-preview'),
@@ -129,6 +130,13 @@ function bindEvents() {
     updateSuggestedCategory();
   });
 
+  els.noteBody.addEventListener('keydown', async (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      await handleSaveNote();
+    }
+  });
+
   els.noteCategory.addEventListener('change', () => {
     state.formCategoryManual = true;
     renderHome();
@@ -185,6 +193,7 @@ async function refreshKnowledge() {
     state.knowledge = await loadKnowledge();
   } catch (error) {
     state.noteStatus = error.message;
+    state.noteStatusTone = 'error';
   }
 
   ensureSelectionForActiveTab();
@@ -197,6 +206,7 @@ function renderAll() {
   renderTabs();
   renderHome();
   renderLibrary();
+  renderPendingScreen();
 }
 
 function renderConfigPanel() {
@@ -208,8 +218,8 @@ function renderConfigPanel() {
 function renderHeader() {
   const pendingCount = pendingKnowledge().length;
   els.headerPendingCount.textContent = `${pendingCount}件`;
-  els.heroPendingCount.textContent = `${pendingCount}件`;
-  els.heroSuggestionLabel.textContent = state.suggestedCategory;
+  els.pendingTabBadge.hidden = pendingCount < 1;
+  els.pendingTabBadge.textContent = String(pendingCount);
 }
 
 function renderTabs() {
@@ -226,17 +236,16 @@ function renderHome() {
   const title = buildAutoTitle(els.noteBody.value.trim());
   els.titlePreview.textContent = `タイトル候補: ${title}`;
   els.noteStatus.textContent = state.noteStatus;
+  els.noteStatus.className = `helper-text status-message is-${state.noteStatusTone}`;
   els.predictedCategoryTag.innerHTML = categoryTag(state.suggestedCategory);
 
   if (!state.formCategoryManual) {
     els.noteCategory.value = state.suggestedCategory;
   }
-
-  renderPendingList();
 }
 
 function renderLibrary() {
-  const isActive = state.activeTab !== 'home';
+  const isActive = !['home', 'pending'].includes(state.activeTab);
   els.libraryScreen.hidden = !isActive;
   if (!isActive) return;
 
@@ -245,6 +254,13 @@ function renderLibrary() {
   renderLibraryHeader(items);
   renderKnowledgeList(items);
   renderDetail(items);
+}
+
+function renderPendingScreen() {
+  const isActive = state.activeTab === 'pending';
+  els.pendingScreen.hidden = !isActive;
+  if (!isActive) return;
+  renderPendingList();
 }
 
 function renderLibraryHeader(items) {
@@ -263,7 +279,7 @@ function renderLibraryHeader(items) {
     return;
   }
 
-  els.libraryCaption.textContent = `${state.activeTab}のナレッジを新しい順で表示しています。`;
+  els.libraryCaption.textContent = `${state.activeTab}のナレッジを新しい順で${items.length}件表示しています。`;
 }
 
 function renderPendingList() {
@@ -298,12 +314,14 @@ function renderPendingList() {
 
 function renderKnowledgeList(items) {
   if (state.activeTab === 'search' && !state.searchQuery) {
-    els.knowledgeList.innerHTML = '<div class="empty-card">キーワードを入力すると検索結果がここに表示されます。</div>';
+    els.knowledgeList.innerHTML = '<div class="empty-card">キーワードを入力すると、全カテゴリのナレッジがここに並びます。</div>';
     return;
   }
 
   if (!items.length) {
-    els.knowledgeList.innerHTML = '<div class="empty-card">該当するナレッジはまだありません。</div>';
+    els.knowledgeList.innerHTML = state.activeTab === 'search'
+      ? '<div class="empty-card">一致するナレッジは見つかりませんでした。語句を変えて再検索してください。</div>'
+      : '<div class="empty-card">このカテゴリのナレッジはまだありません。ホームから最初のノートを保存できます。</div>';
     return;
   }
 
@@ -329,7 +347,7 @@ function renderDetail(items) {
     els.knowledgeDetail.className = 'knowledge-detail empty-card';
     els.knowledgeDetail.textContent = state.activeTab === 'search' && !state.searchQuery
       ? 'キーワードを入力して検索すると、ここに詳細が表示されます。'
-      : '一覧からナレッジを選択すると内容が表示されます。';
+      : '左の一覧からナレッジを選ぶと、ここに詳細が表示されます。';
     return;
   }
 
@@ -349,6 +367,7 @@ async function handleSaveNote() {
   const body = els.noteBody.value.trim();
   if (!body) {
     state.noteStatus = 'ノート本文を入力してください。';
+    state.noteStatusTone = 'error';
     renderHome();
     return;
   }
@@ -365,12 +384,15 @@ async function handleSaveNote() {
       is_pending: false,
     });
 
-    state.noteStatus = `「${saved.title}」を保存しました。`;
+    state.noteStatus = `「${saved.title}」を ${saved.category} に保存しました。`;
+    state.noteStatusTone = 'success';
     state.selectedKnowledgeId = saved.id;
     resetComposer();
     await refreshKnowledge();
+    requestAnimationFrame(() => els.noteBody.focus());
   } catch (error) {
     state.noteStatus = error.message;
+    state.noteStatusTone = 'error';
     renderHome();
   }
 }
@@ -384,9 +406,11 @@ async function handleApprove(knowledgeId) {
       category: knowledge.category || classifyCategory(knowledge.title, knowledge.body),
     });
     state.noteStatus = '承認待ちのナレッジを保存しました。';
+    state.noteStatusTone = 'success';
     await refreshKnowledge();
   } catch (error) {
     state.noteStatus = error.message;
+    state.noteStatusTone = 'error';
     renderHome();
   }
 }
@@ -399,12 +423,14 @@ async function handleReject(knowledgeId) {
   try {
     await rejectKnowledge(knowledgeId);
     state.noteStatus = '承認待ちのナレッジを却下しました。';
+    state.noteStatusTone = 'neutral';
     if (state.selectedKnowledgeId === knowledgeId) {
       state.selectedKnowledgeId = null;
     }
     await refreshKnowledge();
   } catch (error) {
     state.noteStatus = error.message;
+    state.noteStatusTone = 'error';
     renderHome();
   }
 }
@@ -423,7 +449,7 @@ function setActiveTab(tabId) {
 }
 
 function ensureSelectionForActiveTab() {
-  if (state.activeTab === 'home') return;
+  if (state.activeTab === 'home' || state.activeTab === 'pending') return;
   ensureSelection(visibleKnowledgeForActiveTab());
 }
 
