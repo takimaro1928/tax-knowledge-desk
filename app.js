@@ -10,7 +10,7 @@ import {
   signOutAuth,
   createKnowledge,
 } from './api.js?v=20260326-auth1';
-import { readAppConfig, saveAppConfig } from './config.js?v=20260326-auth1';
+import { isConnectionSettingsLocked, readAppConfig, saveAppConfig } from './config.js?v=20260326-auth1';
 
 const CATEGORY_ORDER = [
   '法人税',
@@ -112,9 +112,11 @@ function populateCategorySelect() {
 }
 
 function bindEvents() {
-  els.settingsOpen.addEventListener('click', () => setSettingsOpen(true));
-  els.settingsClose.addEventListener('click', () => setSettingsOpen(false));
-  els.settingsBackdrop.addEventListener('click', () => setSettingsOpen(false));
+  if (!isConnectionSettingsLocked()) {
+    els.settingsOpen.addEventListener('click', () => setSettingsOpen(true));
+    els.settingsClose.addEventListener('click', () => setSettingsOpen(false));
+    els.settingsBackdrop.addEventListener('click', () => setSettingsOpen(false));
+  }
 
   els.configForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -296,8 +298,14 @@ function renderAll() {
 
 function renderConfigPanel() {
   const mode = getConnectionMode();
+  const locked = isConnectionSettingsLocked();
   els.connectionModeLabel.textContent = mode === 'supabase' ? 'Supabase' : 'モック';
   els.configStatus.textContent = state.configStatus;
+  els.settingsOpen.hidden = locked;
+  els.settingsPanel.hidden = locked;
+  if (locked) {
+    setSettingsOpen(false);
+  }
 }
 
 function renderHeader() {
@@ -721,9 +729,27 @@ function getKnowledgeById(id) {
 
 function hydrateConfigForm() {
   const config = readAppConfig();
+  const locked = isConnectionSettingsLocked();
+
+  els.configUrl.disabled = locked;
+  els.configAnonKey.disabled = locked;
+  els.configMockMode.disabled = locked;
+  els.configReset.disabled = locked;
+
+  if (locked) {
+    els.configUrl.value = '';
+    els.configAnonKey.value = '';
+    els.configMockMode.checked = Boolean(config.useMockData);
+    els.configUrl.placeholder = '接続先は固定されています';
+    els.configAnonKey.placeholder = '接続先は固定されています';
+    return;
+  }
+
   els.configUrl.value = config.supabaseUrl ?? '';
   els.configAnonKey.value = config.supabaseAnonKey ?? '';
   els.configMockMode.checked = Boolean(config.useMockData);
+  els.configUrl.placeholder = 'https://YOUR_PROJECT.supabase.co';
+  els.configAnonKey.placeholder = 'eyJ...';
 }
 
 function setSettingsOpen(open) {

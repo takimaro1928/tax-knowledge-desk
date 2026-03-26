@@ -4,6 +4,7 @@ const DEFAULT_CONFIG = {
   supabaseUrl: '',
   supabaseAnonKey: '',
   useMockData: true,
+  lockConnectionSettings: false,
 };
 
 function readStoredConfig() {
@@ -38,4 +39,8 @@ export function saveAppConfig(nextConfig) {
 
 export function readAppConfig() {
   return { ...APP_CONFIG };
+}
+
+export function isConnectionSettingsLocked() {
+  return Boolean(APP_CONFIG.lockConnectionSettings);
 }
