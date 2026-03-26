@@ -1,7 +1,14 @@
-import { APP_CONFIG } from './config.js';
+import { APP_CONFIG } from './config.js?v=20260326-auth1';
 
 const MOCK_STORAGE_KEY = 'knowledge-desk-mock-store';
+const AUTH_STORAGE_KEY = 'knowledge-desk-auth-session';
 const KNOWLEDGE_IMAGE_BUCKET = 'knowledge-images';
+const SESSION_REFRESH_SKEW_MS = 60 * 1000;
+
+let currentSession = readStoredSession();
+let supabaseAuthClient = null;
+let supabaseAuthCacheKey = '';
+let supabaseAuthSubscribed = false;
 
 class ApiError extends Error {
   constructor(message, code = 'API_ERROR', status = null) {
@@ -23,6 +30,10 @@ function timestamp() {
   return new Date().toISOString();
 }
 
+function unixTime() {
+  return Math.floor(Date.now() / 1000);
+}
+
 function isRemoteConfigured() {
   return Boolean(APP_CONFIG.supabaseUrl && APP_CONFIG.supabaseAnonKey && !APP_CONFIG.useMockData);
 }
@@ -31,10 +42,101 @@ export function getConnectionMode() {
   return isRemoteConfigured() ? 'supabase' : 'mock';
 }
 
-function baseHeaders() {
+function normalizeSessionPayload(payload) {
+  const source =
+    payload?.session && typeof payload.session === 'object' && payload.session.access_token
+      ? payload.session
+      : payload;
+
+  if (!source?.access_token) {
+    return null;
+  }
+
+  const expiresIn = Number(source.expires_in ?? 0);
+  const expiresAt =
+    Number(source.expires_at ?? 0) ||
+    (expiresIn > 0 ? unixTime() + expiresIn : 0);
+
+  return {
+    access_token: source.access_token,
+    refresh_token: source.refresh_token ?? '',
+    token_type: source.token_type ?? 'bearer',
+    expires_in: expiresIn > 0 ? expiresIn : Math.max(expiresAt - unixTime(), 0),
+    expires_at: expiresAt,
+    user: source.user ?? payload?.user ?? null,
+  };
+}
+
+function readStoredSession() {
+  try {
+    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    return normalizeSessionPayload(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function persistSession(session) {
+  const normalized = normalizeSessionPayload(session);
+  currentSession = normalized;
+
+  if (!normalized) {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    return null;
+  }
+
+  window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+function sessionNeedsRefresh(session) {
+  if (!session?.expires_at) return false;
+  return session.expires_at * 1000 <= Date.now() + SESSION_REFRESH_SKEW_MS;
+}
+
+function authBaseHeaders() {
   return {
     apikey: APP_CONFIG.supabaseAnonKey,
-    Authorization: `Bearer ${APP_CONFIG.supabaseAnonKey}`,
+  };
+}
+
+function getSupabaseAuthClient() {
+  if (!isRemoteConfigured()) return null;
+  if (!globalThis.supabase?.createClient) return null;
+
+  const cacheKey = `${APP_CONFIG.supabaseUrl}::${APP_CONFIG.supabaseAnonKey}`;
+  if (!supabaseAuthClient || supabaseAuthCacheKey !== cacheKey) {
+    supabaseAuthClient = globalThis.supabase.createClient(APP_CONFIG.supabaseUrl, APP_CONFIG.supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+      },
+    });
+    supabaseAuthCacheKey = cacheKey;
+    supabaseAuthSubscribed = false;
+  }
+
+  if (!supabaseAuthSubscribed) {
+    supabaseAuthClient.auth.onAuthStateChange((_event, session) => {
+      persistSession(session);
+    });
+    supabaseAuthSubscribed = true;
+  }
+
+  return supabaseAuthClient;
+}
+
+function apiHeaders() {
+  const session = currentSession ?? readStoredSession();
+  if (!session?.access_token) {
+    throw new ApiError('ログインが必要です。メールアドレスとパスワードでログインしてください。', 'AUTH_REQUIRED', 401);
+  }
+
+  return {
+    ...authBaseHeaders(),
+    Authorization: `Bearer ${session.access_token}`,
   };
 }
 
@@ -52,6 +154,10 @@ function mapApiError(response, rawText) {
     }
   } catch {
     message = rawText || message;
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    return new ApiError('ログインの有効期限が切れました。再度ログインしてください。', 'AUTH_REQUIRED', response.status);
   }
 
   return new ApiError(message, code, response.status);
@@ -81,12 +187,35 @@ function mapStorageError(response, rawText) {
     }
   }
 
+  if (response.status === 401 || response.status === 403) {
+    return new ApiError('ログインの有効期限が切れました。再度ログインしてください。', 'AUTH_REQUIRED', response.status);
+  }
+
   return new ApiError(message, 'STORAGE_ERROR', response.status);
+}
+
+function mapAuthError(response, rawText) {
+  let message = rawText || `Auth request failed: ${response.status}`;
+  let code = 'AUTH_ERROR';
+
+  try {
+    const parsed = JSON.parse(rawText);
+    message = parsed.msg ?? parsed.message ?? parsed.error_description ?? parsed.error ?? message;
+    code = parsed.code ?? parsed.error ?? code;
+  } catch {
+    message = rawText || message;
+  }
+
+  if (response.status === 400 || response.status === 401) {
+    return new ApiError('メールアドレスまたはパスワードが正しくありません。', 'INVALID_CREDENTIALS', response.status);
+  }
+
+  return new ApiError(message, code, response.status);
 }
 
 async function request(path, init = {}) {
   const headers = {
-    ...baseHeaders(),
+    ...apiHeaders(),
     ...(init.body ? { 'Content-Type': 'application/json' } : {}),
     ...(init.headers ?? {}),
   };
@@ -98,7 +227,11 @@ async function request(path, init = {}) {
 
   if (!response.ok) {
     const rawText = await response.text();
-    throw mapApiError(response, rawText);
+    const error = mapApiError(response, rawText);
+    if (error.code === 'AUTH_REQUIRED') {
+      persistSession(null);
+    }
+    throw error;
   }
 
   if (response.status === 204) {
@@ -115,7 +248,7 @@ async function request(path, init = {}) {
 
 async function storageRequest(path, init = {}) {
   const headers = {
-    ...baseHeaders(),
+    ...apiHeaders(),
     ...(init.headers ?? {}),
   };
 
@@ -126,7 +259,11 @@ async function storageRequest(path, init = {}) {
 
   if (!response.ok) {
     const rawText = await response.text();
-    throw mapStorageError(response, rawText);
+    const error = mapStorageError(response, rawText);
+    if (error.code === 'AUTH_REQUIRED') {
+      persistSession(null);
+    }
+    throw error;
   }
 
   if (response.status === 204) {
@@ -139,6 +276,49 @@ async function storageRequest(path, init = {}) {
   }
 
   return response.json();
+}
+
+async function authRequest(path, init = {}) {
+  const headers = {
+    ...authBaseHeaders(),
+    ...(!(init.body instanceof FormData) && init.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(init.headers ?? {}),
+  };
+
+  const response = await fetch(`${APP_CONFIG.supabaseUrl}/auth/v1${path}`, {
+    ...init,
+    headers,
+  });
+
+  if (!response.ok) {
+    const rawText = await response.text();
+    throw mapAuthError(response, rawText);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    return response.text();
+  }
+
+  return response.json();
+}
+
+async function refreshSession(refreshToken) {
+  const payload = await authRequest('/token?grant_type=refresh_token', {
+    method: 'POST',
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+
+  const nextSession = persistSession(payload);
+  if (!nextSession?.access_token) {
+    throw new ApiError('セッションの更新に失敗しました。再度ログインしてください。', 'AUTH_REFRESH_FAILED', 401);
+  }
+
+  return nextSession;
 }
 
 function safeFileExtension(file) {
@@ -274,6 +454,126 @@ function writeMockStore(records) {
   const normalized = sortKnowledge(records);
   window.localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(normalized));
   return normalized;
+}
+
+export function getAuthSession() {
+  return currentSession ? { ...currentSession } : null;
+}
+
+export function clearAuthSession() {
+  persistSession(null);
+}
+
+export async function restoreAuthSession() {
+  if (!isRemoteConfigured()) {
+    currentSession = null;
+    return null;
+  }
+
+  const client = getSupabaseAuthClient();
+  if (client) {
+    const { data, error } = await client.auth.getSession();
+    if (error) {
+      persistSession(null);
+      return null;
+    }
+
+    const session = persistSession(data?.session ?? null);
+    return session ? { ...session } : null;
+  }
+
+  const stored = readStoredSession();
+  if (!stored) {
+    currentSession = null;
+    return null;
+  }
+
+  if (!sessionNeedsRefresh(stored)) {
+    currentSession = stored;
+    return { ...stored };
+  }
+
+  if (!stored.refresh_token) {
+    persistSession(null);
+    return null;
+  }
+
+  try {
+    const refreshed = await refreshSession(stored.refresh_token);
+    return { ...refreshed };
+  } catch {
+    persistSession(null);
+    return null;
+  }
+}
+
+export async function signInWithPassword({ email, password }) {
+  if (!isRemoteConfigured()) {
+    throw new ApiError('接続設定を保存してからログインしてください。', 'CONFIG_REQUIRED', 400);
+  }
+
+  const client = getSupabaseAuthClient();
+  if (client) {
+    const { data, error } = await client.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      throw new ApiError('メールアドレスまたはパスワードが正しくありません。', 'INVALID_CREDENTIALS', 401);
+    }
+
+    const session = persistSession(data?.session ?? null);
+    if (!session?.access_token) {
+      throw new ApiError('ログインに失敗しました。', 'AUTH_SESSION_MISSING', 500);
+    }
+
+    return { ...session };
+  }
+
+  const payload = await authRequest('/token?grant_type=password', {
+    method: 'POST',
+    body: JSON.stringify({
+      email,
+      password,
+    }),
+  });
+
+  const session = persistSession(payload);
+  if (!session?.access_token) {
+    throw new ApiError('ログインに失敗しました。', 'AUTH_SESSION_MISSING', 500);
+  }
+
+  return { ...session };
+}
+
+export async function signOutAuth() {
+  const client = getSupabaseAuthClient();
+  if (client) {
+    try {
+      await client.auth.signOut();
+    } finally {
+      persistSession(null);
+    }
+    return;
+  }
+
+  const session = currentSession ?? readStoredSession();
+
+  if (isRemoteConfigured() && session?.access_token) {
+    try {
+      await authRequest('/logout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+    } catch {
+      // local cleanup is enough for this app
+    }
+  }
+
+  persistSession(null);
 }
 
 export async function loadKnowledge() {

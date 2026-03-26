@@ -1,11 +1,16 @@
 import {
   approveKnowledge,
-  createKnowledge,
+  clearAuthSession,
+  getAuthSession,
   getConnectionMode,
   loadKnowledge,
   rejectKnowledge,
-} from './api.js';
-import { readAppConfig, saveAppConfig } from './config.js';
+  restoreAuthSession,
+  signInWithPassword,
+  signOutAuth,
+  createKnowledge,
+} from './api.js?v=20260326-auth1';
+import { readAppConfig, saveAppConfig } from './config.js?v=20260326-auth1';
 
 const CATEGORY_ORDER = [
   '法人税',
@@ -37,6 +42,10 @@ const state = {
   noteStatusTone: 'neutral',
   configStatus: '',
   formCategoryManual: false,
+  authSession: getAuthSession(),
+  authStatus: '',
+  authStatusTone: 'neutral',
+  authSubmitting: false,
 };
 
 const els = {
@@ -52,9 +61,18 @@ const els = {
   configReset: document.querySelector('#config-reset'),
   configStatus: document.querySelector('#config-status'),
   connectionModeLabel: document.querySelector('#connection-mode-label'),
+  authStateLabel: document.querySelector('#auth-state-label'),
+  logoutButton: document.querySelector('#logout-button'),
   headerPendingCount: document.querySelector('#header-pending-count'),
   pendingTabBadge: document.querySelector('#pending-tab-badge'),
+  tabBar: document.querySelector('#tab-bar'),
   tabButtons: [...document.querySelectorAll('.tab-button')],
+  authScreen: document.querySelector('#auth-screen'),
+  loginForm: document.querySelector('#login-form'),
+  loginEmail: document.querySelector('#login-email'),
+  loginPassword: document.querySelector('#login-password'),
+  loginSubmit: document.querySelector('#login-submit'),
+  loginStatus: document.querySelector('#login-status'),
   homeScreen: document.querySelector('#home-screen'),
   libraryScreen: document.querySelector('#library-screen'),
   pendingScreen: document.querySelector('#pending-screen'),
@@ -83,6 +101,7 @@ async function init() {
   hydrateConfigForm();
   resetComposer();
   registerServiceWorker();
+  await syncAuthState();
   await refreshKnowledge();
 }
 
@@ -104,7 +123,14 @@ function bindEvents() {
       supabaseAnonKey: els.configAnonKey.value.trim(),
       useMockData: els.configMockMode.checked,
     });
+
+    clearAuthSession();
+    state.authSession = null;
     state.configStatus = '接続設定を保存しました。';
+    state.authStatus = getConnectionMode() === 'supabase'
+      ? '接続設定を保存しました。続けてログインしてください。'
+      : '';
+    state.authStatusTone = 'neutral';
     setSettingsOpen(false);
     renderConfigPanel();
     await refreshKnowledge();
@@ -116,14 +142,28 @@ function bindEvents() {
       supabaseAnonKey: '',
       useMockData: true,
     });
+
+    clearAuthSession();
+    state.authSession = null;
     hydrateConfigForm();
     state.configStatus = '設定を初期化しました。モックデータに切り替えます。';
+    state.authStatus = '';
+    state.authStatusTone = 'neutral';
     renderConfigPanel();
     await refreshKnowledge();
   });
 
   els.tabButtons.forEach((button) => {
     button.addEventListener('click', () => setActiveTab(button.dataset.tab));
+  });
+
+  els.loginForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await handleLogin();
+  });
+
+  els.logoutButton.addEventListener('click', async () => {
+    await handleLogout();
   });
 
   els.noteBody.addEventListener('input', () => {
@@ -188,12 +228,56 @@ function bindEvents() {
   });
 }
 
+async function syncAuthState() {
+  if (getConnectionMode() !== 'supabase') {
+    state.authSession = null;
+    state.authStatus = '';
+    state.authStatusTone = 'neutral';
+    renderAll();
+    return;
+  }
+
+  state.authSession = await restoreAuthSession();
+  if (!state.authSession) {
+    state.authStatus = 'メールアドレスとパスワードでログインしてください。';
+    state.authStatusTone = 'neutral';
+  } else {
+    state.authStatus = '';
+    state.authStatusTone = 'neutral';
+  }
+
+  renderAll();
+}
+
+function canUseApp() {
+  return getConnectionMode() === 'mock' || Boolean(state.authSession?.access_token);
+}
+
+function needsLogin() {
+  return getConnectionMode() === 'supabase' && !state.authSession?.access_token;
+}
+
 async function refreshKnowledge() {
+  if (!canUseApp()) {
+    state.knowledge = [];
+    ensureSelectionForActiveTab();
+    renderAll();
+    return;
+  }
+
   try {
     state.knowledge = await loadKnowledge();
   } catch (error) {
-    state.noteStatus = error.message;
-    state.noteStatusTone = 'error';
+    if (error.code === 'AUTH_REQUIRED') {
+      clearAuthSession();
+      state.authSession = null;
+      state.authStatus = error.message;
+      state.authStatusTone = 'error';
+      state.knowledge = [];
+    } else {
+      state.noteStatus = error.message;
+      state.noteStatusTone = 'error';
+    }
   }
 
   ensureSelectionForActiveTab();
@@ -204,6 +288,7 @@ function renderAll() {
   renderConfigPanel();
   renderHeader();
   renderTabs();
+  renderAuthScreen();
   renderHome();
   renderLibrary();
   renderPendingScreen();
@@ -216,20 +301,37 @@ function renderConfigPanel() {
 }
 
 function renderHeader() {
-  const pendingCount = pendingKnowledge().length;
+  const pendingCount = canUseApp() ? pendingKnowledge().length : 0;
+  const isSupabase = getConnectionMode() === 'supabase';
+  const email = state.authSession?.user?.email ?? '';
+
+  els.authStateLabel.textContent = isSupabase ? (email || (state.authSession ? 'ログイン中' : '未ログイン')) : '不要';
+  els.logoutButton.hidden = !isSupabase || !state.authSession;
   els.headerPendingCount.textContent = `${pendingCount}件`;
   els.pendingTabBadge.hidden = pendingCount < 1;
   els.pendingTabBadge.textContent = String(pendingCount);
 }
 
 function renderTabs() {
+  els.tabBar.hidden = !canUseApp();
   els.tabButtons.forEach((button) => {
     button.classList.toggle('is-active', button.dataset.tab === state.activeTab);
   });
 }
 
+function renderAuthScreen() {
+  const show = needsLogin();
+  els.authScreen.hidden = !show;
+  if (!show) return;
+
+  els.loginSubmit.disabled = state.authSubmitting;
+  els.loginSubmit.textContent = state.authSubmitting ? 'ログイン中...' : 'ログイン';
+  els.loginStatus.textContent = state.authStatus;
+  els.loginStatus.className = `helper-text status-message is-${state.authStatusTone}`;
+}
+
 function renderHome() {
-  const isActive = state.activeTab === 'home';
+  const isActive = state.activeTab === 'home' && canUseApp();
   els.homeScreen.hidden = !isActive;
   if (!isActive) return;
 
@@ -245,7 +347,7 @@ function renderHome() {
 }
 
 function renderLibrary() {
-  const isActive = !['home', 'pending'].includes(state.activeTab);
+  const isActive = !['home', 'pending'].includes(state.activeTab) && canUseApp();
   els.libraryScreen.hidden = !isActive;
   if (!isActive) return;
 
@@ -257,7 +359,7 @@ function renderLibrary() {
 }
 
 function renderPendingScreen() {
-  const isActive = state.activeTab === 'pending';
+  const isActive = state.activeTab === 'pending' && canUseApp();
   els.pendingScreen.hidden = !isActive;
   if (!isActive) return;
   renderPendingList();
@@ -363,6 +465,51 @@ function renderDetail(items) {
   `;
 }
 
+async function handleLogin() {
+  const email = els.loginEmail.value.trim();
+  const password = els.loginPassword.value;
+
+  if (!email || !password) {
+    state.authStatus = 'メールアドレスとパスワードを入力してください。';
+    state.authStatusTone = 'error';
+    renderAuthScreen();
+    return;
+  }
+
+  state.authSubmitting = true;
+  state.authStatus = 'ログイン中です...';
+  state.authStatusTone = 'neutral';
+  renderAll();
+
+  try {
+    state.authSession = await signInWithPassword({ email, password });
+    state.authSubmitting = false;
+    state.authStatus = '';
+    state.authStatusTone = 'neutral';
+    els.loginPassword.value = '';
+    state.activeTab = 'home';
+    await refreshKnowledge();
+    requestAnimationFrame(() => els.noteBody.focus());
+  } catch (error) {
+    state.authSubmitting = false;
+    state.authSession = null;
+    state.authStatus = error.message;
+    state.authStatusTone = 'error';
+    renderAll();
+  }
+}
+
+async function handleLogout() {
+  await signOutAuth();
+  state.authSession = null;
+  state.knowledge = [];
+  state.selectedKnowledgeId = null;
+  state.authStatus = 'ログアウトしました。';
+  state.authStatusTone = 'neutral';
+  renderAll();
+  requestAnimationFrame(() => els.loginEmail.focus());
+}
+
 async function handleSaveNote() {
   const body = els.noteBody.value.trim();
   if (!body) {
@@ -391,6 +538,15 @@ async function handleSaveNote() {
     await refreshKnowledge();
     requestAnimationFrame(() => els.noteBody.focus());
   } catch (error) {
+    if (error.code === 'AUTH_REQUIRED') {
+      clearAuthSession();
+      state.authSession = null;
+      state.authStatus = error.message;
+      state.authStatusTone = 'error';
+      await refreshKnowledge();
+      return;
+    }
+
     state.noteStatus = error.message;
     state.noteStatusTone = 'error';
     renderHome();
@@ -409,6 +565,15 @@ async function handleApprove(knowledgeId) {
     state.noteStatusTone = 'success';
     await refreshKnowledge();
   } catch (error) {
+    if (error.code === 'AUTH_REQUIRED') {
+      clearAuthSession();
+      state.authSession = null;
+      state.authStatus = error.message;
+      state.authStatusTone = 'error';
+      await refreshKnowledge();
+      return;
+    }
+
     state.noteStatus = error.message;
     state.noteStatusTone = 'error';
     renderHome();
@@ -429,6 +594,15 @@ async function handleReject(knowledgeId) {
     }
     await refreshKnowledge();
   } catch (error) {
+    if (error.code === 'AUTH_REQUIRED') {
+      clearAuthSession();
+      state.authSession = null;
+      state.authStatus = error.message;
+      state.authStatusTone = 'error';
+      await refreshKnowledge();
+      return;
+    }
+
     state.noteStatus = error.message;
     state.noteStatusTone = 'error';
     renderHome();
@@ -443,12 +617,18 @@ function openKnowledgeInCategory(knowledgeId) {
 }
 
 function setActiveTab(tabId) {
+  if (!canUseApp()) return;
   state.activeTab = tabId;
   ensureSelectionForActiveTab();
   renderAll();
 }
 
 function ensureSelectionForActiveTab() {
+  if (!canUseApp()) {
+    state.selectedKnowledgeId = null;
+    return;
+  }
+
   if (state.activeTab === 'home' || state.activeTab === 'pending') return;
   ensureSelection(visibleKnowledgeForActiveTab());
 }

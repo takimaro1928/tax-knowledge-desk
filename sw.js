@@ -1,12 +1,12 @@
-const CACHE_NAME = 'knowledge-desk-v4';
+const CACHE_NAME = 'knowledge-desk-v5-auth';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './styles.css?v=20260321-knowledge-final1',
-  './app.js?v=20260321-knowledge-final1',
-  './api.js',
-  './config.js',
-  './manifest.webmanifest?v=20260321-knowledge-final1',
+  './styles.css?v=20260326-auth1',
+  './app.js?v=20260326-auth1',
+  './api.js?v=20260326-auth1',
+  './config.js?v=20260326-auth1',
+  './manifest.webmanifest?v=20260326-auth1',
   './icons/icon-192.svg',
   './icons/icon-512.svg',
 ];

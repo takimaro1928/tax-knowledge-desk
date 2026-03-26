@@ -8,8 +8,8 @@
       name="description"
       content="税理士事務所向けのナレッジ管理アプリ。ノートを自由に書き込むだけでカテゴリ判定し、検索と一覧で蓄積できます。"
     />
-    <link rel="manifest" href="./manifest.webmanifest?v=20260321-knowledge-final1" />
-    <link rel="stylesheet" href="./styles.css?v=20260321-knowledge-final1" />
+    <link rel="manifest" href="./manifest.webmanifest?v=20260326-auth1" />
+    <link rel="stylesheet" href="./styles.css?v=20260326-auth1" />
     <title>Knowledge Desk</title>
   </head>
   <body>
@@ -61,15 +61,20 @@
             <span class="chip-label">接続先</span>
             <strong id="connection-mode-label">モック</strong>
           </div>
+          <div class="connection-chip">
+            <span class="chip-label">ログイン</span>
+            <strong id="auth-state-label">未ログイン</strong>
+          </div>
           <div class="connection-chip pending-chip">
             <span class="chip-label">承認待ち</span>
             <strong id="header-pending-count">0件</strong>
           </div>
+          <button id="logout-button" class="button ghost" type="button" hidden>ログアウト</button>
           <button id="settings-open" class="button ghost" type="button">接続設定</button>
         </div>
       </header>
 
-      <nav class="tab-bar" aria-label="画面タブ">
+      <nav id="tab-bar" class="tab-bar" aria-label="画面タブ">
         <button class="tab-button is-active" type="button" data-tab="home">ホーム</button>
         <button class="tab-button" type="button" data-tab="法人税">法人税</button>
         <button class="tab-button" type="button" data-tab="所得税">所得税</button>
@@ -86,6 +91,36 @@
       </nav>
 
       <main class="main-stack">
+        <section id="auth-screen" class="screen auth-screen" hidden>
+          <section class="auth-center">
+            <form id="login-form" class="panel auth-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Auth</p>
+                  <h2>ログイン</h2>
+                </div>
+              </div>
+
+              <p class="helper-text auth-copy">Supabase Auth に登録済みのメールアドレスとパスワードでログインしてください。</p>
+
+              <label class="field field-full">
+                <span>メールアドレス</span>
+                <input id="login-email" type="email" autocomplete="username" placeholder="you@example.com" />
+              </label>
+
+              <label class="field field-full">
+                <span>パスワード</span>
+                <input id="login-password" type="password" autocomplete="current-password" placeholder="••••••••" />
+              </label>
+
+              <div class="auth-actions">
+                <button id="login-submit" class="button primary" type="submit">ログイン</button>
+              </div>
+              <p id="login-status" class="helper-text status-message" aria-live="polite"></p>
+            </form>
+          </section>
+        </section>
+
         <section id="home-screen" class="screen">
           <section class="home-center">
             <form id="note-form" class="panel composer-panel">
@@ -182,6 +217,7 @@
     </div>
 
     <script src="./config.local.js"></script>
-    <script type="module" src="./app.js?v=20260321-knowledge-final1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script type="module" src="./app.js?v=20260326-auth1"></script>
   </body>
 </html>

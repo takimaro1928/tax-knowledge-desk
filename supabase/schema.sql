@@ -35,9 +35,10 @@ execute function public.set_updated_at();
 alter table public.knowledge enable row level security;
 
 drop policy if exists "open access knowledge" on public.knowledge;
-create policy "open access knowledge"
+drop policy if exists "authenticated knowledge access" on public.knowledge;
+create policy "authenticated knowledge access"
 on public.knowledge
 for all
-to anon, authenticated
+to authenticated
 using (true)
 with check (true);

@@ -102,6 +102,7 @@ p {
 .panel,
 .main-stack,
 .home-center,
+.auth-center,
 .knowledge-list,
 .pending-list,
 .knowledge-detail,
@@ -265,6 +266,7 @@ p {
 
 .main-stack,
 .home-center,
+.auth-center,
 .knowledge-list,
 .pending-list {
   gap: 18px;
@@ -313,6 +315,31 @@ p {
 .home-center {
   width: 100%;
   justify-items: center;
+}
+
+.auth-screen {
+  min-height: min(72vh, 820px);
+}
+
+.auth-center {
+  width: 100%;
+  min-height: inherit;
+  place-items: center;
+}
+
+.auth-panel {
+  width: 100%;
+  max-width: 520px;
+}
+
+.auth-copy {
+  line-height: 1.8;
+}
+
+.auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 .panel,
@@ -600,6 +627,10 @@ p {
   .panel,
   .hero-card {
     padding: 18px;
+  }
+
+  .auth-panel {
+    max-width: 100%;
   }
 
   .composer-meta {
